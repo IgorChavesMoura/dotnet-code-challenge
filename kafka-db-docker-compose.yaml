@@ -114,17 +114,17 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
-    comm# Copy script to writable location and fix line endings
-        cp /scripts/seed-inventory.sh /tmp/seed-inventory.sh
-        dos2unix /tmp/seed-inventory.sh 2>/dev/null || sed -i 's/\r$//' /tmp/seed-inventory.sh
-        chmod +x /tmp/seed-inventory.sh
-        bash /tmp
+    command:
       - bash
       - -lc
       - |
         echo "[mongodb-seed] Waiting for MongoDB..."
         sleep 5
-        bash /scripts/seed-inventory.sh
+        # Copy script to writable location and fix line endings
+        cp /scripts/seed-inventory.sh /tmp/seed-inventory.sh
+        dos2unix /tmp/seed-inventory.sh 2>/dev/null || sed -i 's/\r$//' /tmp/seed-inventory.sh
+        chmod +x /tmp/seed-inventory.sh
+        bash /tmp/seed-inventory.sh
     volumes:
       - ./docker/seed-inventory.sh:/scripts/seed-inventory.sh:ro
     restart: on-failure
