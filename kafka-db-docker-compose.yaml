@@ -1,0 +1,166 @@
+
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: zk
+    environment:
+      ZOOKEEPER_CLIENT_PORT: ${ZK_PORT:-2181}
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "${ZK_PORT:-2181}:2181"
+
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:${ZK_PORT:-2181}"
+
+      KAFKA_LISTENERS: "INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka:29092,EXTERNAL://${KAFKA_ADVERTISED_HOST:-localhost}:${KAFKA_PORT:-9092}"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "/usr/bin/kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - bash
+      - -lc
+      - |
+        echo "[setup] waiting for broker..."
+        for i in {1..60}; do
+          /usr/bin/kafka-topics --bootstrap-server kafka:29092 --list >/dev/null 2>&1 && break
+          sleep 2
+        done
+        chmod +x /scripts/init-topics.sh || true
+        bash /scripts/init-topics.sh
+    environment:
+      BOOTSTRAP_SERVERS: "kafka:29092"
+      PARTITIONS: "${PARTITIONS:-3}"
+      RF: "${REPLICATION_FACTOR:-1}"
+      TOPIC_ORDERS: "${TOPIC_ORDERS:-orders}"
+      TOPIC_ORDERS_RETRY: "${TOPIC_ORDERS_RETRY:-orders-retry}"
+      TOPIC_ORDERS_DLQ: "${TOPIC_ORDERS_DLQ:-orders-dlq}"
+      TOPIC_PAYMENTS: "${TOPIC_PAYMENTS:-payments}"
+      TOPIC_INVENTORY: "${TOPIC_INVENTORY:-inventory}"
+    volumes:
+      - ./docker/init-topics.sh:/scripts/init-topics.sh:ro
+
+
+  kafka-seed:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka-seed
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
+    command:
+      - bash
+      - -lc
+      - |
+        echo "[seed] Waiting for broker..."
+        for i in {1..60}; do
+          /usr/bin/kafka-topics --bootstrap-server kafka:29092 --list >/dev/null 2>&1 && break
+          sleep 2
+        done
+        if [ "${SEED_ENABLED:-true}" = "true" ]; then
+          bash /scripts/seed-orders.sh
+        else
+          echo "[seed] Skipped (SEED_ENABLED=false)."
+        fi
+    environment:
+      BOOTSTRAP_SERVERS: "kafka:29092"
+      TOPIC_ORDERS: "${TOPIC_ORDERS:-orders}"
+      SEED_COUNT: "${SEED_COUNT:-100}"
+      SEED_ENABLED: "${SEED_ENABLED:-true}"
+      INTERVIEW_MODE: "${INTERVIEW_MODE:-true}"
+    volumes:
+      - ./docker/seed-orders.sh:/scripts/seed-orders.sh:ro
+      - ./docker/interview-orders.txt:/scripts/interview-orders.txt:ro
+
+  mongodb-seed:
+    image: mongo:7.0
+    container_name: mongodb-seed
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command:
+      - bash
+      - -lc
+      - |
+        echo "[mongodb-seed] Waiting for MongoDB..."
+        sleep 5
+        bash /scripts/seed-inventory.sh
+    volumes:
+      - ./docker/seed-inventory.sh:/scripts/seed-inventory.sh:ro
+    restart: on-failure
+
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-password}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-orders}
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo-express
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "${MONGO_EXPRESS_PORT:-8081}:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER:-admin}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:-password}
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-password}@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USER:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-admin}
+
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "${KAFKA_UI_PORT:-8090}:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "InterviewCluster"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:29092"
+
+
+volumes:
+  mongodb_data:
