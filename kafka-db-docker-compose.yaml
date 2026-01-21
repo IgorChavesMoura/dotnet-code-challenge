@@ -54,8 +54,11 @@ services:
           /usr/bin/kafka-topics --bootstrap-server kafka:29092 --list >/dev/null 2>&1 && break
           sleep 2
         done
-        chmod +x /scripts/init-topics.sh || true
-        bash /scripts/init-topics.sh
+        # Copy script to writable location and fix line endings
+        cp /scripts/init-topics.sh /tmp/init-topics.sh
+        dos2unix /tmp/init-topics.sh 2>/dev/null || sed -i 's/\r$//' /tmp/init-topics.sh
+        chmod +x /tmp/init-topics.sh
+        bash /tmp/init-topics.sh
     environment:
       BOOTSTRAP_SERVERS: "kafka:29092"
       PARTITIONS: "${PARTITIONS:-3}"
@@ -85,7 +88,13 @@ services:
           sleep 2
         done
         if [ "${SEED_ENABLED:-true}" = "true" ]; then
-          bash /scripts/seed-orders.sh
+          # Copy scripts to writable location and fix line endings
+          cp /scripts/seed-orders.sh /tmp/seed-orders.sh
+          cp /scripts/interview-orders.txt /tmp/interview-orders.txt
+          dos2unix /tmp/seed-orders.sh 2>/dev/null || sed -i 's/\r$//' /tmp/seed-orders.sh
+          dos2unix /tmp/interview-orders.txt 2>/dev/null || sed -i 's/\r$//' /tmp/interview-orders.txt
+          chmod +x /tmp/seed-orders.sh
+          bash /tmp/seed-orders.sh
         else
           echo "[seed] Skipped (SEED_ENABLED=false)."
         fi
@@ -105,7 +114,11 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
-    command:
+    comm# Copy script to writable location and fix line endings
+        cp /scripts/seed-inventory.sh /tmp/seed-inventory.sh
+        dos2unix /tmp/seed-inventory.sh 2>/dev/null || sed -i 's/\r$//' /tmp/seed-inventory.sh
+        chmod +x /tmp/seed-inventory.sh
+        bash /tmp
       - bash
       - -lc
       - |
