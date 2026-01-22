@@ -87,12 +87,16 @@ services:
           /usr/bin/kafka-topics --bootstrap-server kafka:29092 --list >/dev/null 2>&1 && break
           sleep 2
         done
-        cp /scripts/seed-orders.sh /tmp/seed-orders.sh
-        cp /scripts/interview-orders.txt /tmp/interview-orders.txt
-        dos2unix /tmp/seed-orders.sh 2>/dev/null || sed -i 's/\r$//' /tmp/seed-orders.sh
-        dos2unix /tmp/interview-orders.txt 2>/dev/null || sed -i 's/\r$//' /tmp/interview-orders.txt
-        chmod +x /tmp/seed-orders.sh
-        bash /tmp/seed-orders.sh
+        if [ "$${SEED_ENABLED:-true}" = "true" ]; then
+          cp /scripts/seed-orders.sh /tmp/seed-orders.sh
+          cp /scripts/interview-orders.txt /tmp/interview-orders.txt
+          dos2unix /tmp/seed-orders.sh 2>/dev/null || sed -i 's/\r$$//' /tmp/seed-orders.sh
+          dos2unix /tmp/interview-orders.txt 2>/dev/null || sed -i 's/\r$$//' /tmp/interview-orders.txt
+          chmod +x /tmp/seed-orders.sh
+          bash /tmp/seed-orders.sh
+        else
+          echo "[seed] Skipped (SEED_ENABLED=false)."
+        fi
     environment:
       BOOTSTRAP_SERVERS: "kafka:29092"
       TOPIC_ORDERS: "${TOPIC_ORDERS:-orders}"
